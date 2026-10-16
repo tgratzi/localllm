@@ -1,0 +1,5 @@
+# The build context only needs the entrypoint. Everything else stays out, so secrets,
+# local .env files and stray model downloads can never be copied into an image.
+*
+!docker/
+!docker/entrypoint.sh

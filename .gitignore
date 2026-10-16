@@ -1,0 +1,32 @@
+# Model weights: they live in the image, never in Git.
+*.gguf
+*.bin
+*.safetensors
+models/
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+secrets/
+*.key
+*.pem
+*api_key*
+gcp/env.sh
+gcp/.rotation-old-version
+*-sa-key.json
+credentials*.json
+
+# Local caches and build output
+.cache/
+.huggingface/
+__pycache__/
+*.pyc
+sbom/
+*.sbom.json
+*.log
+
+# Editors / OS
+.idea/
+.DS_Store
+Thumbs.db

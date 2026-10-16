@@ -1,0 +1,45 @@
+# Runs the Gemma server. Used both for local testing and on the GCE VM.
+# All settings come from a .env file next to this file (see .env.example).
+name: gemma
+
+services:
+  gemma:
+    image: ${GEMMA_IMAGE:?set GEMMA_IMAGE to the image tag or, in production, the image digest}
+    # tini as PID 1: forwards SIGTERM to llama-server and reaps zombies.
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    ports:
+      # Local testing: 127.0.0.1 (loopback only). On the VM: the VM's internal IP.
+      # Never 0.0.0.0 on a host with a public interface.
+      - "${GEMMA_BIND_ADDRESS:-127.0.0.1}:${GEMMA_HOST_PORT:-8080}:8080"
+    environment:
+      LLAMA_ARG_CTX_SIZE: ${GEMMA_CTX_SIZE:-8192}
+      LLAMA_ARG_THREADS: ${GEMMA_THREADS:-4}
+      LLAMA_ARG_N_PARALLEL: ${GEMMA_PARALLEL:-1}
+      LLAMA_ARG_N_PREDICT: ${GEMMA_MAX_TOKENS:-1024}
+      LLAMA_ARG_TIMEOUT: ${GEMMA_TIMEOUT_SECONDS:-300}
+      LLAMA_ARG_REASONING: ${GEMMA_REASONING:-off}
+      LLAMA_ARG_API_KEY_FILE: /run/secrets/llama_api_key
+    secrets:
+      - llama_api_key
+    # Hardening: nothing in the container needs to write outside /tmp or gain privileges.
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: ${GEMMA_MEM_LIMIT:-12g}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+secrets:
+  llama_api_key:
+    # A file on the host, bind-mounted read-only at /run/secrets/llama_api_key.
+    # It must be readable by UID/GID 10001 inside the container.
+    file: ${GEMMA_API_KEY_FILE:?set GEMMA_API_KEY_FILE to the path of the API key file}

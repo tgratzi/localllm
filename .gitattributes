@@ -1,0 +1,5 @@
+# Shell scripts run inside Linux containers and VMs: a Windows checkout must not turn
+# them into CRLF, or they fail with "/bin/sh^M: bad interpreter".
+* text=auto eol=lf
+*.sh text eol=lf
+Dockerfile text eol=lf
