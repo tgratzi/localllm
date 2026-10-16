@@ -30,3 +30,4 @@ sbom/
 .idea/
 .DS_Store
 Thumbs.db
+.vscode/changelists.json
