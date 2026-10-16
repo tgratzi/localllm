@@ -18,6 +18,8 @@ gcp/.rotation-old-version
 credentials*.json
 
 # Local caches and build output
+dist/
+.baseimage/
 .cache/
 .huggingface/
 __pycache__/

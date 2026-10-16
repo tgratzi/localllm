@@ -1,0 +1,110 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: {{ include "localllm.name" . }}
+    labels:
+        {{- include "localllm.labels" . | nindent 8 }}
+spec:
+    replicas: 1
+    # Recreate, not RollingUpdate: two copies of a ~6 GB model at once can exhaust the node.
+    strategy:
+        type: Recreate
+    selector:
+        matchLabels:
+            app: {{ include "localllm.name" . }}
+    template:
+        metadata:
+            labels:
+                {{- include "localllm.labels" . | nindent 16 }}
+            annotations:
+                # llama-server reads the key file only at start. A new revision restarts the
+                # pod, so a key changed by an upgrade is always picked up.
+                localllm/release-revision: {{ .Release.Revision | quote }}
+        spec:
+            # The server never talks to the Kubernetes API.
+            automountServiceAccountToken: false
+            enableServiceLinks: false
+            securityContext:
+                # UID/GID 10001 is the image's "llama" user; fsGroup makes the key file readable by it.
+                runAsNonRoot: true
+                runAsUser: 10001
+                runAsGroup: 10001
+                fsGroup: 10001
+                seccompProfile:
+                    type: RuntimeDefault
+            terminationGracePeriodSeconds: 30
+            containers:
+                -   name: llama-server
+                    image: {{ .Values.image.registry | trimSuffix "/" }}/{{ .Values.image.repository }}:{{ .Values.image.version }}
+                    imagePullPolicy: {{ .Values.image.pullPolicy }}
+                    env:
+                        -   name: LLAMA_ARG_API_KEY_FILE
+                            value: /run/secrets/localllm/api_key
+                        -   name: LLAMA_ARG_THREADS
+                            value: {{ .Values.llm.threads | quote }}
+                        -   name: LLAMA_ARG_CTX_SIZE
+                            value: {{ .Values.llm.ctxSize | quote }}
+                        -   name: LLAMA_ARG_N_PARALLEL
+                            value: {{ .Values.llm.parallel | quote }}
+                        -   name: LLAMA_ARG_N_PREDICT
+                            value: {{ .Values.llm.maxTokens | quote }}
+                        -   name: LLAMA_ARG_TIMEOUT
+                            value: {{ .Values.llm.timeoutSeconds | quote }}
+                        -   name: LLAMA_ARG_REASONING
+                            value: {{ .Values.llm.reasoning | quote }}
+                    ports:
+                        -   name: http
+                            containerPort: 8080
+                    # /health is llama-server's only unauthenticated route: 503 while loading, 200 when ready.
+                    startupProbe:
+                        httpGet:
+                            path: /health
+                            port: http
+                        periodSeconds: {{ .Values.probes.startup.periodSeconds }}
+                        failureThreshold: {{ .Values.probes.startup.failureThreshold }}
+                        timeoutSeconds: 5
+                    readinessProbe:
+                        httpGet:
+                            path: /health
+                            port: http
+                        periodSeconds: 10
+                        timeoutSeconds: 5
+                    livenessProbe:
+                        httpGet:
+                            path: /health
+                            port: http
+                        periodSeconds: 30
+                        timeoutSeconds: 5
+                        failureThreshold: 3
+                    resources:
+                        {{- toYaml .Values.resources | nindent 24 }}
+                    securityContext:
+                        allowPrivilegeEscalation: false
+                        readOnlyRootFilesystem: true
+                        capabilities:
+                            drop: ["ALL"]
+                    volumeMounts:
+                        -   name: api-key
+                            mountPath: /run/secrets/localllm
+                            readOnly: true
+                        -   name: tmp
+                            mountPath: /tmp
+            volumes:
+                -   name: api-key
+                    secret:
+                        secretName: {{ include "localllm.secretName" . }}
+                        defaultMode: 0440
+                        items:
+                            -   key: api_key
+                                path: api_key
+                -   name: tmp
+                    emptyDir:
+                        sizeLimit: 64Mi
+            {{- with .Values.nodeSelector }}
+            nodeSelector:
+                {{- toYaml . | nindent 16 }}
+            {{- end }}
+            {{- with .Values.tolerations }}
+            tolerations:
+                {{- toYaml . | nindent 16 }}
+            {{- end }}

@@ -1,0 +1,53 @@
+image:
+    # `tos apps install` replaces the registry with the cluster's own registry
+    # (tos-registry.local) and keeps the repository path, so the two stay separate.
+    # scripts/build-tupack.sh points the registry at a temporary local one at build time.
+    registry: tos-registry.local/
+    repository: localllm/gemma-e2b-server
+    # Set to the release version by scripts/build-tupack.sh.
+    version: "0.0.0"
+    pullPolicy: IfNotPresent
+
+service:
+    # Apps in the same namespace call http://localllm:8080/v1
+    port: 8080
+
+apiKey:
+    # Leave empty: the chart creates Secret "<release>-api-key" (key: api_key) with a
+    # random key and keeps it across upgrades. Set to the name of an existing Secret
+    # with an "api_key" entry to supply your own key instead.
+    existingSecret: ""
+
+# llama-server settings. Same meaning as the GEMMA_* variables in .env.example.
+llm:
+    # CPU threads for generation. Match the CPU request below, then measure.
+    threads: 4
+    # Tokens of context, shared by all parallel slots.
+    ctxSize: 8192
+    # Requests generated at once; others queue.
+    parallel: 1
+    # Server-side cap on generated tokens per request.
+    maxTokens: 1024
+    # HTTP read/write timeout in seconds.
+    timeoutSeconds: 300
+    # Gemma "thinking" output: "off" | "on" | "auto". Keep the quotes: bare off is a boolean in YAML.
+    reasoning: "off"
+
+resources:
+    # Q8_0 weights are ~5 GB (memory-mapped and charged to the pod) plus the KV cache.
+    requests:
+        cpu: "2"
+        memory: 6Gi
+    # No CPU limit: throttling makes generation much slower and buys nothing here.
+    limits:
+        memory: 10Gi
+
+probes:
+    # Loading the model takes 10-60 s on a warm node, longer on a cold disk. The startup
+    # probe allows up to periodSeconds * failureThreshold before Kubernetes restarts the pod.
+    startup:
+        periodSeconds: 10
+        failureThreshold: 60
+
+nodeSelector: {}
+tolerations: []

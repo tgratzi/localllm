@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Building the TOS Package</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1f2328;
+    --muted: #59636e;
+    --border: #d1d9e0;
+    --code-bg: #f6f8fa;
+    --accent: #0969da;
+    --note-bg: #ddf4ff;
+    --note-border: #54aeff;
+    --warn-bg: #fff8c5;
+    --warn-border: #d4a72c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0d1117;
+      --fg: #e6edf3;
+      --muted: #9198a1;
+      --border: #3d444d;
+      --code-bg: #161b22;
+      --accent: #4493f8;
+      --note-bg: #0c2d4a;
+      --note-border: #1f6feb;
+      --warn-bg: #3a2d05;
+      --warn-border: #9e6a03;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --border: #3d444d;
+    --code-bg: #161b22;
+    --accent: #4493f8;
+    --note-bg: #0c2d4a;
+    --note-border: #1f6feb;
+    --warn-bg: #3a2d05;
+    --warn-border: #9e6a03;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  main { max-width: 820px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 1.9rem; line-height: 1.25; margin: 0 0 8px; }
+  h2 { font-size: 1.35rem; margin: 40px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 1.05rem; margin: 24px 0 8px; }
+  p, li { max-width: 72ch; }
+  .lead { color: var(--muted); font-size: 1.05rem; margin-top: 0; }
+  a { color: var(--accent); }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+    font-size: 0.9em;
+    background: var(--code-bg);
+    padding: 1px 5px;
+    border-radius: 4px;
+    overflow-wrap: anywhere;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px 14px;
+    overflow-x: auto;
+    font-size: 0.88rem;
+    line-height: 1.5;
+  }
+  pre code { background: none; padding: 0; font-size: inherit; overflow-wrap: normal; }
+  .comment { color: var(--muted); }
+  .box { border-left: 4px solid; border-radius: 4px; padding: 10px 14px; margin: 16px 0; }
+  .box p { margin: 4px 0; }
+  .note { background: var(--note-bg); border-color: var(--note-border); }
+  .warn { background: var(--warn-bg); border-color: var(--warn-border); }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 0.95rem; }
+  th, td { border: 1px solid var(--border); padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { background: var(--code-bg); }
+  .table-wrap { overflow-x: auto; }
+  ol.steps > li { margin-bottom: 6px; }
+  details { border: 1px solid var(--border); border-radius: 6px; padding: 8px 14px; margin: 16px 0; }
+  details[open] { padding-bottom: 14px; }
+  summary { cursor: pointer; font-weight: 600; }
+  h4 { font-size: 1rem; margin: 20px 0 6px; }
+  nav ol { padding-left: 20px; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Building the TOS package by hand</h1>
+<p class="lead">How to turn this repo into one file you can copy to a TOS machine and install with
+<code>tos apps install</code>. The steps take about 20–30 minutes, most of it downloading.</p>
+
+<nav>
+  <ol>
+    <li><a href="#what">What you are building</a></li>
+    <li><a href="#need">What you need first</a></li>
+    <li><a href="#image">Step 1: Build the Docker image</a></li>
+    <li><a href="#test">Step 2: Test the image (optional)</a></li>
+    <li><a href="#tupack">Step 3: Get tupack</a></li>
+    <li><a href="#package">Step 4: Package it into the .tar file</a></li>
+    <li><a href="#install">Step 5: Install it on the TOS machine</a></li>
+    <li><a href="#trouble">When something goes wrong</a></li>
+    <li><a href="#next">Building a new version later</a></li>
+  </ol>
+</nav>
+
+<h2 id="what">1. What you are building</h2>
+<p>A TOS machine has no access to the internet or to our image registries. So everything it needs
+has to arrive in a single file. You build that file in two stages:</p>
+<ol>
+  <li><strong>A Docker image</strong> that contains the model server (<code>llama-server</code>) and the
+    Gemma model itself (about 5&nbsp;GB). The model is baked in at build time, so the running
+    container never downloads anything.</li>
+  <li><strong>A TOS package</strong>: one <code>.tar</code> file made by <code>tupack</code>, Tufin's
+    packaging tool. It holds the Helm chart (the instructions that tell Kubernetes what to run) and a
+    copy of the Docker image. <code>tos apps install</code> reads this file directly.</li>
+</ol>
+<p>After installing, other apps in the cluster can reach the model at
+<code>http://localllm:8080/v1</code>. It is not reachable from outside the cluster.</p>
+
+<h2 id="need">2. What you need first</h2>
+<div class="table-wrap">
+<table>
+  <tr><th>What</th><th>Why</th></tr>
+  <tr><td><strong>Docker</strong> running (Docker Desktop on Windows/Mac, or Docker on Linux)</td>
+      <td>Builds the image and runs the packaging tools.</td></tr>
+  <tr><td><strong>A bash shell</strong>: Git Bash on Windows, or any Linux/macOS/WSL terminal</td>
+      <td>The scripts are bash. PowerShell and <code>cmd</code> won't run them.</td></tr>
+  <tr><td><code>curl</code> and <code>python3</code></td>
+      <td>Used to check the model file on Hugging Face before the long download. Git Bash includes curl;
+      install Python if <code>python3 --version</code> fails.</td></tr>
+  <tr><td><strong>About 25&nbsp;GB of free disk</strong> for Docker</td>
+      <td>The model is 5&nbsp;GB, and during the build it exists in several copies at once
+      (download stage, final image, packaging cache, output file).</td></tr>
+  <tr><td><strong>Internet access</strong> to huggingface.co, ghcr.io and Docker Hub</td>
+      <td>The model comes from Hugging Face, the server from ghcr.io, and two small helper images from Docker Hub.</td></tr>
+  <tr><td><strong>Read access</strong> to the private GitHub repo <code>tufin-ext-resources/baseimage7</code></td>
+      <td><code>tupack</code> is only distributed there. Without it you can build the image but not the package.</td></tr>
+</table>
+</div>
+<p>Every command below runs from the root of this repo (the folder that contains the <code>Dockerfile</code>).</p>
+
+<h2 id="image">3. Step 1: Build the Docker image</h2>
+<pre><code>scripts/build-image.sh</code></pre>
+<p>What happens:</p>
+<ol class="steps">
+  <li>It first checks with Hugging Face that the exact model file pinned in the <code>Dockerfile</code> still
+    exists and that its fingerprint (SHA-256) matches. This takes seconds, and it saves you from waiting
+    through a 5&nbsp;GB download only to fail at the end.</li>
+  <li>It builds the image. The model download is the slow part: expect 5–20 minutes depending on your connection.
+    The build checks the downloaded file's fingerprint again and refuses to continue if it doesn't match.</li>
+</ol>
+<p>When it finishes you have an image called <code>gemma-e2b-server:local</code>. Check with:</p>
+<pre><code>docker images gemma-e2b-server</code></pre>
+<div class="box note">
+  <p>Building again later is fast. Docker reuses the downloaded model unless you change the
+  model settings in the <code>Dockerfile</code> or clear Docker's build cache.</p>
+</div>
+
+<h2 id="test">4. Step 2: Test the image (optional, recommended)</h2>
+<pre><code>scripts/test-local.sh</code></pre>
+<p>This starts the image on your machine, checks that a request <em>without</em> the API key is refused,
+sends one real chat request and prints the answer, then starts it again with no network at all to prove the
+model is inside the image. It cleans up after itself.</p>
+<div class="box warn">
+  <p><strong>Port 8080 must be free.</strong> If you already run the model locally with
+  <code>docker compose up</code>, stop it first (<code>docker compose down</code>), or the test can't start.</p>
+</div>
+
+<h2 id="tupack">5. Step 3: Get tupack</h2>
+<p><code>tupack</code> is a single Linux program. You don't install it; you just need the file. Clone the
+repo that contains it, at the release tag this repo was tested with:</p>
+<pre><code>git clone --branch v0.5.5 --depth 1 https://github.com/tufin-ext-resources/baseimage7.git ../baseimage7</code></pre>
+<p>The file you need is <code>../baseimage7/src/scripts/tupack</code>. If you already have baseimage7 cloned,
+use that copy.</p>
+<p>It runs inside a Linux container, so this works from Windows and macOS as well.</p>
+
+<h2 id="package">6. Step 4: Package it into the .tar file</h2>
+<p>This step takes the image from Step 1 and the <code>tupack</code> file from Step 3 and produces the
+<code>.tar</code> you install on TOS. One script does all of it. You need to run one command, in the right
+kind of terminal.</p>
+
+<h3>4a. Open a bash terminal in the repo folder</h3>
+<ul>
+  <li><strong>Windows:</strong> open <strong>Git Bash</strong> (not PowerShell, not Command Prompt). In File Explorer,
+    right-click the repo folder and choose <em>Open Git Bash here</em>, or start Git Bash and type the folder path
+    with forward slashes, for example:
+    <pre><code>cd /c/Users/&lt;you&gt;/AntiGravityProjects/localllm</code></pre>
+    PowerShell won't work. The command below sets a setting in front of the script name
+    (<code>TUPACK=...</code>), and that only works in bash.</li>
+  <li><strong>Linux, macOS or WSL:</strong> any terminal. <code>cd</code> into the repo folder.</li>
+</ul>
+<p>Make sure Docker Desktop is running (its whale icon is in the taskbar and says "running").</p>
+
+<h3>4b. Check the two inputs are there</h3>
+<pre><code><span class="comment"># The image from Step 1. You should see one line: gemma-e2b-server   local   ...</span>
+docker images gemma-e2b-server
+
+<span class="comment"># The tupack file from Step 3. You should see the file listed, about 42 MB.</span>
+ls -lh ../baseimage7/src/scripts/tupack</code></pre>
+<p>If either is missing, go back to Step 1 or Step 3. If baseimage7 is somewhere else on your disk, use that
+path in the next command instead of <code>../baseimage7</code>.</p>
+
+<h3>4c. Run the packaging command</h3>
+<pre><code>TUPACK=../baseimage7/src/scripts/tupack scripts/build-tupack.sh v0.1.0</code></pre>
+<p>The command has three parts:</p>
+<div class="table-wrap">
+<table>
+  <tr><th>Part</th><th>Meaning</th></tr>
+  <tr><td><code>TUPACK=../baseimage7/src/scripts/tupack</code></td>
+      <td>Tells the script where the <code>tupack</code> file is. No spaces around the <code>=</code>.</td></tr>
+  <tr><td><code>scripts/build-tupack.sh</code></td>
+      <td>The packaging script in this repo.</td></tr>
+  <tr><td><code>v0.1.0</code></td>
+      <td>The version of the package you are making. Choose it yourself and increase it every time. It must
+      look like <code>v1.2.3</code>; <code>1.2.3</code> and <code>v1.2.3-rc.1</code> are also accepted.</td></tr>
+</table>
+</div>
+<p>It runs for 3–10 minutes. Leave the terminal open until you get the prompt back.</p>
+
+<h3>4d. What a successful run looks like</h3>
+<pre><code>==&gt; Starting temporary registry on 127.0.0.1:5000
+==&gt; Pushing gemma-e2b-server:local to the temporary registry
+==&gt; Preparing chart localllm 0.1.0
+==&gt; Running tupack (archives ~5 GB, takes a few minutes)
+INF ==&gt; Parsing directories…
+INF :: Chart: 'chart/localllm/'
+INF Collected apps/v1, Kind=Deployment, Name=localllm
+INF ==&gt; Downloading container images…
+INF Downloading image metadata localhost:5000/localllm/gemma-e2b-server:0.1.0
+INF Archiving 1 images… This can take some time.
+INF Images archive complete.
+INF ==&gt; Preparing release archive…
+INF Saved 'localllm.tar'
+INF Build completed.
+
+Built:  dist/localllm-0.1.0.tar (4.8G)
+SHA256: 5a1df0d2e0c7642938cb59f62573a8db265a78b39a5d9501fb65f7d18fd99c65
+
+Install on the TOS node:  tos apps install localllm-0.1.0.tar
+Upgrade:                  tos apps upgrade localllm-0.1.0.tar</code></pre>
+<p>The last lines starting with <code>Built:</code> mean it worked. Your SHA256 will be different; that's
+expected. If the output stops with a line starting with <code>ERROR:</code>, look it up in
+<a href="#trouble">When something goes wrong</a>.</p>
+
+<h3>4e. Check the result</h3>
+<pre><code>ls -lh dist/
+<span class="comment"># localllm-0.1.0.tar          about 4.8G
+# localllm-0.1.0.tar.sha256   a few bytes</span>
+
+<span class="comment"># Optional: look inside the package. You should see exactly these four entries.</span>
+tar tvf dist/localllm-0.1.0.tar
+<span class="comment"># release.yaml                  what the package is: name, version, which image
+# charts/                       folder
+# charts/localllm-0.1.0.tgz     the Helm chart
+# images.tar                    the Docker image, about 4.8 GB</span></code></pre>
+
+<h3>4f. What the script did for you</h3>
+<p>In order:</p>
+<ol class="steps">
+  <li><strong>Starts a temporary image registry on your machine.</strong> <code>tupack</code> can only
+    read images from a registry, not from Docker's own list of images, so the script runs a throwaway one
+    on <code>127.0.0.1:5000</code>. It is only reachable from your own machine.</li>
+  <li><strong>Pushes your image into it</strong> (about a minute).</li>
+  <li><strong>Copies the Helm chart</strong> from <code>charts/localllm</code> and stamps your version number into the copy.
+    The original in the repo is not changed.</li>
+  <li><strong>Runs <code>tupack</code></strong>, which reads the chart, finds the image it uses, downloads it
+    from the temporary registry, and writes everything into one <code>.tar</code> (3–5 minutes).</li>
+  <li><strong>Cleans up</strong>: removes the temporary registry and its working folder, even if a step failed.</li>
+</ol>
+<div class="box note">
+  <p><strong>Optional safety check:</strong> add <code>TUPACK_SHA256=840e9de158e25975478aadec20bcc165bb98c49f5e4ce8b11b47be86cb82ab7f</code>
+  in front of the command. The script then refuses to run any <code>tupack</code> file other than the
+  one from <code>v0.5.5</code>.</p>
+</div>
+
+<details>
+<summary>4g. Doing the same thing without the script (to understand it, or if the script fails)</summary>
+<p>These are the same steps the script runs, one command at a time. Run them in Git Bash or a Linux terminal from
+the repo folder. Use them to see exactly which step fails, or to adapt the process. For normal builds, use the
+script: it also checks your inputs and always cleans up.</p>
+
+<h4>1. Choose the version and start a temporary registry</h4>
+<pre><code>VERSION=0.1.0
+docker run -d --rm --name pkg-registry -p 127.0.0.1:5000:5000 registry:2</code></pre>
+<p>A registry is a server that stores images. <code>tupack</code> can only read images from one, so this
+starts an empty, temporary one on your machine.</p>
+
+<h4>2. Put your image into it</h4>
+<pre><code>docker tag  gemma-e2b-server:local localhost:5000/localllm/gemma-e2b-server:$VERSION
+docker push localhost:5000/localllm/gemma-e2b-server:$VERSION</code></pre>
+<p><code>docker tag</code> gives the image a second name that says "in the registry at localhost:5000".
+<code>docker push</code> copies it there.</p>
+
+<h4>3. Make a working copy of the chart with your version number in it</h4>
+<pre><code>mkdir -p dist/work/chart
+cp -R charts/localllm dist/work/chart/
+sed -i "s/^version:.*/version: $VERSION/; s/^appVersion:.*/appVersion: \"$VERSION\"/" dist/work/chart/localllm/Chart.yaml
+sed -i -E "s/^(    version:).*/\1 \"$VERSION\"/" dist/work/chart/localllm/values.yaml</code></pre>
+<p>The first <code>sed</code> sets the chart's version, the second sets which image tag the chart asks for.
+Afterwards, <code>grep version dist/work/chart/localllm/*.yaml</code> should show your version three times.</p>
+
+<h4>4. Tell tupack where to find the image during the build</h4>
+<pre><code>printf 'image:\n    registry: localhost:5000/\n' &gt; dist/work/build-values.yaml
+cp ../baseimage7/src/scripts/tupack dist/work/</code></pre>
+<p>The chart normally points at <code>tos-registry.local</code>, the registry inside TOS. This small file overrides
+that <em>only while building</em>, so <code>tupack</code> reads from your temporary registry. The packaged chart
+still says <code>tos-registry.local</code>, which is what TOS needs.</p>
+
+<h4>5. Run tupack</h4>
+<pre><code><span class="comment"># Windows Git Bash only: stop Git Bash from rewriting the /w paths, and give Docker a Windows path.</span>
+export MSYS_NO_PATHCONV=1
+WORK="$(cygpath -w "$PWD/dist/work" 2&gt;/dev/null || echo "$PWD/dist/work")"
+
+docker run --rm --network container:pkg-registry -v "$WORK:/w" -w /w ubuntu:24.04 \
+  /w/tupack build \
+    --name localllm --version "$VERSION" --type marketplace \
+    --title "Local LLM (Gemma 4 E2B)" \
+    --sha "$(git rev-parse --short=12 HEAD)" --no-progress \
+    --build-values /w/build-values.yaml \
+    chart/localllm/</code></pre>
+<p><code>tupack</code> is a Linux program, so it runs inside an Ubuntu container. <code>--network container:pkg-registry</code>
+puts that container on the registry's network, so <code>localhost:5000</code> inside it reaches the registry. This works
+the same on Windows, macOS and Linux. The result is <code>dist/work/localllm.tar</code>.</p>
+
+<h4>6. Name the file, record its fingerprint, clean up</h4>
+<pre><code>mv dist/work/localllm.tar dist/localllm-$VERSION.tar
+(cd dist &amp;&amp; sha256sum localllm-$VERSION.tar &gt; localllm-$VERSION.tar.sha256)
+docker rm -f pkg-registry
+rm -rf dist/work</code></pre>
+<p>Removing the registry also deletes the copy of the image that was pushed into it, about 5&nbsp;GB of disk.</p>
+</details>
+
+<h2 id="install">7. Step 5: Install it on the TOS machine</h2>
+<p>Copy both files from <code>dist/</code> to the TOS machine (for example with <code>scp</code>), then on that machine:</p>
+<pre><code><span class="comment"># 1. Check the copy is complete. It must print "OK".</span>
+sha256sum -c localllm-0.1.0.tar.sha256
+
+<span class="comment"># 2. Install. For a machine that already has an older version, use "upgrade" instead.</span>
+tos apps install localllm-0.1.0.tar
+<span class="comment"># tos apps upgrade localllm-0.1.0.tar</span>
+
+<span class="comment"># 3. Watch it start. Wait for 1/1 Running. Loading the model takes up to a few minutes.</span>
+kubectl get pod -l app=localllm -w</code></pre>
+<p>The TOS machine needs about <strong>2 free CPUs and 6&nbsp;GB of free memory</strong>. If the pod stays
+<code>Pending</code>, there isn't enough room; <code>kubectl describe pod -l app=localllm</code> says why.</p>
+<p>To remove it: <code>tos apps uninstall localllm</code>. This also deletes the API key, so a later install gets a new one.</p>
+<p>How other apps connect to it (address, API key, code example) is in
+<a href="kubernetes.md">kubernetes.md</a>.</p>
+
+<h2 id="trouble">8. When something goes wrong</h2>
+<div class="table-wrap">
+<table>
+  <tr><th>You see</th><th>What it means and what to do</th></tr>
+  <tr><td><code>image 'gemma-e2b-server:local' not found</code></td>
+      <td>Step 1 hasn't been run, or the image was deleted. Run <code>scripts/build-image.sh</code>.</td></tr>
+  <tr><td><code>set TUPACK to the tupack binary</code></td>
+      <td>You left out <code>TUPACK=...</code> in front of the command, or the path is wrong. Check the file exists.</td></tr>
+  <tr><td><code>is not a semantic version</code></td>
+      <td>The version must look like <code>v1.2.3</code>. Words like <code>latest</code> or <code>v1.2</code> are rejected.</td></tr>
+  <tr><td><code>temporary registry did not start</code> or "port is already allocated"</td>
+      <td>Something else uses port 5000. Pick another: put <code>REGISTRY_PORT=5077</code> in front of the command.</td></tr>
+  <tr><td><code>no space left on device</code></td>
+      <td>Docker's disk is full. <code>docker builder prune</code> clears old build cache (the next image build
+      then downloads the model again). <code>docker system df</code> shows what uses the space.</td></tr>
+  <tr><td><code>SHA-256 mismatch</code> during Step 1</td>
+      <td>The downloaded model isn't the expected file. Don't work around it. Run
+      <code>scripts/verify-model-file.sh</code> to see what changed on Hugging Face.</td></tr>
+  <tr><td><code>sha256sum -c</code> prints <code>FAILED</code> on the TOS machine</td>
+      <td>The copy was cut short or damaged in transfer. Copy the <code>.tar</code> again.</td></tr>
+  <tr><td>Very slow packaging on Windows</td>
+      <td>Normal. Writing 5&nbsp;GB from Docker Desktop into a Windows folder is slower than on Linux. Give it 10 minutes.</td></tr>
+</table>
+</div>
+
+<h2 id="next">9. Building a new version later</h2>
+<ul>
+  <li><strong>Same model, new version number</strong> (for example, you changed a chart setting): skip Step 1 and run
+    Step 4 with the new version. Packaging always uses whatever <code>gemma-e2b-server:local</code> currently is.</li>
+  <li><strong>Different model or llama.cpp version</strong>: change the pinned values in the <code>Dockerfile</code>,
+    then run all the steps again. Install the result with <code>tos apps upgrade</code>.</li>
+  <li><strong>Always increase the version number.</strong> Two different packages with the same version are hard to tell apart on the TOS machine.</li>
+  <li><strong>Commit before building a release.</strong> The package records the Git commit it was built from. If
+    you have uncommitted changes it records the commit with <code>-dirty</code> added, so you can tell later that it
+    doesn't match any commit exactly.</li>
+</ul>
+<p>Pushing a tag such as <code>v0.2.0</code> to GitHub runs the same steps automatically and attaches the result to a
+GitHub Release, split into parts because GitHub limits each file to 2&nbsp;GB. That needs the repository secret
+<code>BASEIMAGE_TOKEN</code>; see <code>.github/workflows/release-tupack.yml</code>.</p>
+
+</main>
+</body>
+</html>

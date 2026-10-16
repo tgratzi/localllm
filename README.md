@@ -29,8 +29,27 @@ docker/entrypoint.sh                     refuses to start without an API key, th
 scripts/                                 build, local test, deploy (run locally / Cloud Shell)
 scripts/vm/                              helpers copied to and run on the VM
 gcp/                                     network, VM, secret, Cloud Run, verification, cleanup
-docs/                                    architecture, operations, troubleshooting
+charts/localllm/                         Helm chart for Kubernetes / TOS
+scripts/build-tupack.sh                  packages chart + image as a TOS app .tar (tupack)
+.github/workflows/release-tupack.yml     builds that .tar on each v* tag, publishes a GitHub Release
+docs/                                    architecture, operations, troubleshooting, kubernetes
 ```
+
+## Run on Kubernetes (TOS)
+
+The same image also ships as a TOS app: one `.tar` built by `tupack` that holds the Helm chart
+and the image. Push a `v*` tag and the workflow attaches it to a GitHub Release, split into
+parts under GitHub's 2 GiB file limit. On the TOS node:
+
+```bash
+cat localllm-1.0.0.tar.part-* > localllm-1.0.0.tar && sha256sum -c localllm-1.0.0.tar.sha256
+tos apps install localllm-1.0.0.tar
+```
+
+Other pods then call `http://localllm:8080/v1` with the key from Secret `localllm-api-key`.
+Nothing is exposed outside the cluster. Details, caller example and limits:
+[docs/kubernetes.md](docs/kubernetes.md). Step-by-step manual build:
+[docs/build-tos-package.html](docs/build-tos-package.html).
 
 ## Where commands run
 

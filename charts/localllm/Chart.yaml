@@ -1,0 +1,7 @@
+apiVersion: v2
+name: localllm
+description: Private Gemma 4 E2B chat model (llama.cpp llama-server, CPU only) for apps inside the cluster
+type: application
+# scripts/build-tupack.sh sets both versions from the release tag in its working copy.
+version: 0.0.0
+appVersion: "0.0.0"
